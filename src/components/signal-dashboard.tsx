@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { signIn } from "next-auth/react";
 import {
   categoryLabels,
   hotwords,
@@ -13,6 +14,7 @@ type Period = "today" | "week" | "month";
 
 type SignalDashboardProps = {
   initialSignals: Signal[];
+  isAuthenticated: boolean;
 };
 
 const categories: Array<SignalCategory | "all"> = [
@@ -72,7 +74,25 @@ function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
 
-export function SignalDashboard({ initialSignals }: SignalDashboardProps) {
+function getVisibleSignals(signals: Signal[], isAuthenticated: boolean) {
+  if (isAuthenticated) {
+    return signals.map((signal) => ({ signal, locked: false }));
+  }
+
+  const categoryCounts = new Map<SignalCategory, number>();
+
+  return signals.map((signal) => {
+    const nextCount = (categoryCounts.get(signal.category) ?? 0) + 1;
+    categoryCounts.set(signal.category, nextCount);
+
+    return {
+      signal,
+      locked: nextCount > 3
+    };
+  });
+}
+
+export function SignalDashboard({ initialSignals, isAuthenticated }: SignalDashboardProps) {
   const [activeCategory, setActiveCategory] = useState<SignalCategory | "all">("all");
   const [period, setPeriod] = useState<Period>("week");
 
@@ -92,6 +112,13 @@ export function SignalDashboard({ initialSignals }: SignalDashboardProps) {
       return matchesCategory && matchesPeriod;
     });
   }, [activeCategory, period, sortedSignals]);
+
+  const visibleSignals = useMemo(
+    () => getVisibleSignals(filteredSignals, isAuthenticated),
+    [filteredSignals, isAuthenticated]
+  );
+
+  const lockedCount = visibleSignals.filter((item) => item.locked).length;
 
   const stats = useMemo(() => {
     const todayStart = periodStart("today").getTime();
@@ -125,22 +152,33 @@ export function SignalDashboard({ initialSignals }: SignalDashboardProps) {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 thin-scrollbar">
-              {periods.map((item) => (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              {!isAuthenticated ? (
                 <button
-                  key={item.key}
                   type="button"
-                  onClick={() => setPeriod(item.key)}
-                  className={classNames(
-                    "h-9 shrink-0 rounded-full border px-4 text-sm transition",
-                    period === item.key
-                      ? "border-signal-green/50 bg-signal-green/[0.15] text-signal-green"
-                      : "border-white/10 bg-white/[0.03] text-signal-muted hover:border-white/20 hover:text-white"
-                  )}
+                  onClick={() => signIn()}
+                  className="h-9 rounded-lg border border-signal-green/40 bg-signal-green/[0.14] px-4 text-sm font-medium text-signal-green transition hover:bg-signal-green/[0.2]"
                 >
-                  {item.label}
+                  登录解锁全部
                 </button>
-              ))}
+              ) : null}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 thin-scrollbar">
+                {periods.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setPeriod(item.key)}
+                    className={classNames(
+                      "h-9 shrink-0 rounded-full border px-4 text-sm transition",
+                      period === item.key
+                        ? "border-signal-green/50 bg-signal-green/[0.15] text-signal-green"
+                        : "border-white/10 bg-white/[0.03] text-signal-muted hover:border-white/20 hover:text-white"
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -179,7 +217,14 @@ export function SignalDashboard({ initialSignals }: SignalDashboardProps) {
               </h2>
             </div>
             <div className="grid grid-cols-3 gap-2 text-center sm:w-[300px]">
-              <Metric label="卡片" value={filteredSignals.length} />
+              <Metric
+                label={lockedCount > 0 ? "可读/锁定" : "卡片"}
+                value={
+                  lockedCount > 0
+                    ? `${filteredSignals.length - lockedCount}/${lockedCount}`
+                    : filteredSignals.length
+                }
+              />
               <Metric
                 label="互动"
                 value={compactFormatter.format(
@@ -196,8 +241,12 @@ export function SignalDashboard({ initialSignals }: SignalDashboardProps) {
           </div>
 
           <div className="space-y-4">
-            {filteredSignals.map((signal) => (
-              <SignalCard key={signal.id} signal={signal} />
+            {visibleSignals.map(({ signal, locked }) => (
+              locked ? (
+                <LockedSignalCard key={signal.id} signal={signal} />
+              ) : (
+                <SignalCard key={signal.id} signal={signal} />
+              )
             ))}
           </div>
         </section>
@@ -238,6 +287,57 @@ function Metric({ label, value }: { label: string; value: number | string }) {
       <div className="text-base font-semibold text-white">{value}</div>
       <div className="mt-0.5 text-xs text-signal-muted">{label}</div>
     </div>
+  );
+}
+
+function LockedSignalCard({ signal }: { signal: Signal }) {
+  return (
+    <button
+      type="button"
+      onClick={() => signIn()}
+      className="group block w-full rounded-xl border border-white/10 bg-signal-card p-4 text-left shadow-glow transition hover:border-signal-green/40 sm:p-5"
+      aria-label="登录后查看完整信号"
+    >
+      <div className="relative overflow-hidden rounded-lg">
+        <div className="select-none blur-[5px]">
+          <div className="flex items-start gap-3 opacity-70">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-signal-blue/70 to-signal-green/70 text-sm font-bold text-white">
+              {signal.avatar}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <h3 className="font-semibold text-white">{signal.author}</h3>
+                <span className="text-sm text-signal-muted">{signal.handle}</span>
+                <span className="rounded-full border border-white/10 px-2 py-0.5 text-xs text-signal-muted">
+                  {categoryLabels[signal.category]}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-signal-muted">{signal.role}</p>
+              <p className="mt-4 line-clamp-3 text-[15px] leading-7 text-signal-text sm:text-base">
+                {signal.zh}
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {signal.tags.slice(0, 3).map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full border border-signal-green/20 bg-signal-green/[0.08] px-3 py-1 text-xs text-signal-green"
+                  >
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="absolute inset-0 grid place-items-center bg-signal-card/70 px-4 backdrop-blur-[2px]">
+          <div className="rounded-lg border border-signal-green/30 bg-signal-bg/90 px-5 py-3 text-center shadow-glow">
+            <div className="text-sm font-semibold text-white">登录后查看完整信号</div>
+            <div className="mt-1 text-xs text-signal-muted">未登录用户每个分类可预览最新 3 条</div>
+          </div>
+        </div>
+      </div>
+    </button>
   );
 }
 

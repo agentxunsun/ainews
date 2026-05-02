@@ -1,6 +1,5 @@
-import { SignalDashboard } from "@/components/signal-dashboard";
-import { signals } from "@/data/signals";
+import { SignalDashboardServer } from "@/components/signal-dashboard-server";
 
 export default function Home() {
-  return <SignalDashboard initialSignals={signals} />;
+  return <SignalDashboardServer />;
 }
